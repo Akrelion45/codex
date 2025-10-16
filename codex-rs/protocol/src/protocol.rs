@@ -631,13 +631,13 @@ pub struct TokenCountEvent {
     pub rate_limits: Option<RateLimitSnapshot>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 pub struct RateLimitSnapshot {
     pub primary: Option<RateLimitWindow>,
     pub secondary: Option<RateLimitWindow>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 pub struct RateLimitWindow {
     /// Percentage (0-100) of the window that has been consumed.
     pub used_percent: f64,
@@ -647,6 +647,9 @@ pub struct RateLimitWindow {
     /// Seconds until the window resets.
     #[ts(type = "number | null")]
     pub resets_in_seconds: Option<u64>,
+    /// Epoch timestamp, in seconds, when the window resets.
+    #[ts(type = "number | null")]
+    pub resets_at: Option<i64>,
 }
 
 // Includes prompts, tools and space to call compact.

@@ -382,16 +382,19 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn rate_limit_snapshot() -> RateLimitSnapshot {
+        const EPOCH_SECONDS: i64 = 1_700_000_000;
         RateLimitSnapshot {
             primary: Some(RateLimitWindow {
                 used_percent: 50.0,
                 window_minutes: Some(60),
                 resets_in_seconds: Some(3600),
+                resets_at: Some(EPOCH_SECONDS + 3600),
             }),
             secondary: Some(RateLimitWindow {
                 used_percent: 30.0,
                 window_minutes: Some(120),
                 resets_in_seconds: Some(7200),
+                resets_at: Some(EPOCH_SECONDS + 7200),
             }),
         }
     }

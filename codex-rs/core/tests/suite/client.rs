@@ -1,3 +1,5 @@
+use chrono::DateTime;
+use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_core::CodexAuth;
 use codex_core::ContentItem;
@@ -761,7 +763,16 @@ async fn token_count_includes_rate_limits_snapshot() {
     let server = MockServer::start().await;
 
     let sse_body = responses::sse(vec![responses::ev_completed_with_tokens("resp_rate", 123)]);
-
+    let primary_reset_iso = "2050-01-01T00:30:00Z";
+    let secondary_reset_iso = "2050-01-01T02:00:00Z";
+    let primary_reset_epoch = DateTime::parse_from_rfc3339(primary_reset_iso)
+        .expect("primary reset at to parse")
+        .with_timezone(&Utc)
+        .timestamp();
+    let secondary_reset_epoch = DateTime::parse_from_rfc3339(secondary_reset_iso)
+        .expect("secondary reset at to parse")
+        .with_timezone(&Utc)
+        .timestamp();
     let response = ResponseTemplate::new(200)
         .insert_header("content-type", "text/event-stream")
         .insert_header("x-codex-primary-used-percent", "12.5")
@@ -770,6 +781,8 @@ async fn token_count_includes_rate_limits_snapshot() {
         .insert_header("x-codex-secondary-window-minutes", "60")
         .insert_header("x-codex-primary-reset-after-seconds", "1800")
         .insert_header("x-codex-secondary-reset-after-seconds", "7200")
+        .insert_header("x-codex-primary-reset-at", primary_reset_iso)
+        .insert_header("x-codex-secondary-reset-at", secondary_reset_iso)
         .set_body_raw(sse_body, "text/event-stream");
 
     Mock::given(method("POST"))
@@ -818,12 +831,14 @@ async fn token_count_includes_rate_limits_snapshot() {
                 "primary": {
                     "used_percent": 12.5,
                     "window_minutes": 10,
-                    "resets_in_seconds": 1800
+                    "resets_in_seconds": 1800,
+                    "resets_at": primary_reset_epoch
                 },
                 "secondary": {
                     "used_percent": 40.0,
                     "window_minutes": 60,
-                    "resets_in_seconds": 7200
+                    "resets_in_seconds": 7200,
+                    "resets_at": secondary_reset_epoch
                 }
             }
         })
@@ -865,12 +880,14 @@ async fn token_count_includes_rate_limits_snapshot() {
                 "primary": {
                     "used_percent": 12.5,
                     "window_minutes": 10,
-                    "resets_in_seconds": 1800
+                    "resets_in_seconds": 1800,
+                    "resets_at": primary_reset_epoch
                 },
                 "secondary": {
                     "used_percent": 40.0,
                     "window_minutes": 60,
-                    "resets_in_seconds": 7200
+                    "resets_in_seconds": 7200,
+                    "resets_at": secondary_reset_epoch
                 }
             }
         })
@@ -889,12 +906,35 @@ async fn token_count_includes_rate_limits_snapshot() {
             .map(|window| window.used_percent),
         Some(12.5)
     );
+    let primary_window = final_snapshot
+        .primary
+        .as_ref()
+        .expect("primary rate limit window should be present");
+    assert_eq!(primary_window.resets_in_seconds, Some(1800));
+    let primary_resets_at = primary_window
+        .resets_at
+        .expect("primary resets_at should be present");
+    let secondary_window = final_snapshot
+        .secondary
+        .as_ref()
+        .expect("secondary rate limit window should be present");
+    assert_eq!(secondary_window.resets_in_seconds, Some(7200));
+    let secondary_resets_at = secondary_window
+        .resets_at
+        .expect("secondary resets_at should be present");
+    assert_eq!(primary_resets_at, primary_reset_epoch);
+    assert_eq!(secondary_resets_at, secondary_reset_epoch);
+    let primary_resets_in_seconds = i64::try_from(primary_window.resets_in_seconds.unwrap())
+        .expect("primary resets_in_seconds fits in i64");
+    let secondary_resets_in_seconds = i64::try_from(secondary_window.resets_in_seconds.unwrap())
+        .expect("secondary resets_in_seconds fits in i64");
     assert_eq!(
-        final_snapshot
-            .primary
-            .as_ref()
-            .and_then(|window| window.resets_in_seconds),
-        Some(1800)
+        primary_resets_at
+            .checked_sub(primary_resets_in_seconds)
+            .expect("primary reset should follow capture"),
+        secondary_resets_at
+            .checked_sub(secondary_resets_in_seconds)
+            .expect("secondary reset should follow capture")
     );
 
     wait_for_event(&codex, |msg| matches!(msg, EventMsg::TaskComplete(_))).await;
@@ -935,12 +975,14 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
         "primary": {
             "used_percent": 100.0,
             "window_minutes": 15,
-            "resets_in_seconds": null
+            "resets_in_seconds": null,
+            "resets_at": null
         },
         "secondary": {
             "used_percent": 87.5,
             "window_minutes": 60,
-            "resets_in_seconds": null
+            "resets_in_seconds": null,
+            "resets_at": null
         }
     });
 

@@ -2,6 +2,8 @@ use std::io::BufRead;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use crate::AuthManager;
 use crate::auth::CodexAuth;
@@ -10,6 +12,8 @@ use crate::error::ResponseStreamFailed;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use bytes::Bytes;
+use chrono::DateTime;
+use chrono::Utc;
 use codex_app_server_protocol::AuthMode;
 use codex_protocol::ConversationId;
 use eventsource_stream::Eventsource;
@@ -606,6 +610,7 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshot> {
         "x-codex-primary-used-percent",
         "x-codex-primary-window-minutes",
         "x-codex-primary-reset-after-seconds",
+        "x-codex-primary-reset-at",
     );
 
     let secondary = parse_rate_limit_window(
@@ -613,6 +618,7 @@ fn parse_rate_limit_snapshot(headers: &HeaderMap) -> Option<RateLimitSnapshot> {
         "x-codex-secondary-used-percent",
         "x-codex-secondary-window-minutes",
         "x-codex-secondary-reset-after-seconds",
+        "x-codex-secondary-reset-at",
     );
 
     Some(RateLimitSnapshot { primary, secondary })
@@ -623,6 +629,7 @@ fn parse_rate_limit_window(
     used_percent_header: &str,
     window_minutes_header: &str,
     resets_header: &str,
+    resets_at_header: &str,
 ) -> Option<RateLimitWindow> {
     let used_percent: Option<f64> = parse_header_f64(headers, used_percent_header);
 
@@ -630,14 +637,30 @@ fn parse_rate_limit_window(
         let window_minutes = parse_header_u64(headers, window_minutes_header);
         let resets_in_seconds = parse_header_u64(headers, resets_header);
 
+        let resets_at = parse_header_epoch_seconds(headers, resets_at_header).or_else(|| {
+            // Remove fallback once backend is deployed
+            resets_in_seconds.and_then(|seconds| {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .and_then(|duration| {
+                        let epoch_seconds = i64::try_from(duration.as_secs()).ok()?;
+                        let seconds_i64 = i64::try_from(seconds).ok()?;
+                        epoch_seconds.checked_add(seconds_i64)
+                    })
+            })
+        });
+
         let has_data = used_percent != 0.0
             || window_minutes.is_some_and(|minutes| minutes != 0)
-            || resets_in_seconds.is_some_and(|seconds| seconds != 0);
+            || resets_in_seconds.is_some_and(|seconds| seconds != 0)
+            || resets_at.is_some();
 
         has_data.then_some(RateLimitWindow {
             used_percent,
             window_minutes,
             resets_in_seconds,
+            resets_at,
         })
     })
 }
@@ -651,6 +674,14 @@ fn parse_header_f64(headers: &HeaderMap, name: &str) -> Option<f64> {
 
 fn parse_header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
     parse_header_str(headers, name)?.parse::<u64>().ok()
+}
+
+fn parse_header_epoch_seconds(headers: &HeaderMap, name: &str) -> Option<i64> {
+    let value = parse_header_str(headers, name)?;
+    let datetime = DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))?;
+    Some(datetime.timestamp())
 }
 
 fn parse_header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
