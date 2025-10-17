@@ -2,8 +2,6 @@ use std::io::BufRead;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use crate::AuthManager;
 use crate::auth::CodexAuth;
@@ -636,20 +634,7 @@ fn parse_rate_limit_window(
     used_percent.and_then(|used_percent| {
         let window_minutes = parse_header_u64(headers, window_minutes_header);
         let resets_in_seconds = parse_header_u64(headers, resets_header);
-
-        let resets_at = parse_header_epoch_seconds(headers, resets_at_header).or_else(|| {
-            // Remove fallback once backend is deployed
-            resets_in_seconds.and_then(|seconds| {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .ok()
-                    .and_then(|duration| {
-                        let epoch_seconds = i64::try_from(duration.as_secs()).ok()?;
-                        let seconds_i64 = i64::try_from(seconds).ok()?;
-                        epoch_seconds.checked_add(seconds_i64)
-                    })
-            })
-        });
+        let resets_at = parse_header_epoch_seconds(headers, resets_at_header);
 
         let has_data = used_percent != 0.0
             || window_minutes.is_some_and(|minutes| minutes != 0)
