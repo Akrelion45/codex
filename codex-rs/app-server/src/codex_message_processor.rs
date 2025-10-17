@@ -11,6 +11,7 @@ use codex_app_server_protocol::ApplyPatchApprovalParams;
 use codex_app_server_protocol::ApplyPatchApprovalResponse;
 use codex_app_server_protocol::ArchiveConversationParams;
 use codex_app_server_protocol::ArchiveConversationResponse;
+use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::AuthStatusChangeNotification;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ConversationSummary;
@@ -533,6 +534,14 @@ impl CodexMessageProcessor {
                 data: None,
             });
         };
+
+        if auth.mode != AuthMode::ChatGPT {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "chatgpt authentication required to read rate limits".to_string(),
+                data: None,
+            });
+        }
 
         let token = auth.get_token().await.map_err(|err| JSONRPCErrorError {
             code: INTERNAL_ERROR_CODE,
